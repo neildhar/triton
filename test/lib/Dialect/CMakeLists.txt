@@ -1,4 +1,4 @@
-add_mlir_library(TritonTestDialect
+add_triton_library(TritonTestDialect
   TestLoopPeeling.cpp
 
   LINK_LIBS PUBLIC

@@ -45,6 +45,11 @@ config.test_exec_root = os.path.join(config.triton_obj_root, 'test')
 config.triton_tools_dir = os.path.join(config.triton_obj_root, 'bin')
 config.filecheck_dir = os.path.join(config.triton_obj_root, 'bin', 'FileCheck')
 
+# If we are building with LLVM from source, llvm_tools_dir is may not be set, but
+# llvm_obj_root will be. So we can use that to find the tools.
+if not config.llvm_tools_dir:
+    config.llvm_tools_dir = os.path.join(config.llvm_obj_root, 'bin')
+
 # FileCheck -enable-var-scope is enabled by default in MLIR test
 # This option avoids to accidentally reuse variable across -LABEL match,
 # it can be explicitly opted-in by prefixing the variable name with $

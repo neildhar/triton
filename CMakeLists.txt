@@ -23,6 +23,7 @@ option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
 option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
 option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
 set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
+set(TRITON_LLVM_SOURCE_DIR "" CACHE STRING "Consume LLVM source from this directory")
 
 if(TRITON_BUILD_WITH_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -93,19 +94,43 @@ endif()
 # #########
 # LLVM
 # #########
-if(NOT MLIR_DIR)
-  set(MLIR_DIR ${LLVM_LIBRARY_DIR}/cmake/mlir)
+
+if(TRITON_LLVM_SOURCE_DIR)
+  # Set CMP0126 so the variables we define here take precedence over the default
+  # values for the cache variables in LLVM.
+  set(CMAKE_POLICY_DEFAULT_CMP0126 NEW)
+  set(LLVM_ENABLE_PROJECTS "mlir")
+  set(LLVM_TARGETS_TO_BUILD "host;NVPTX;AMDGPU")
+  set(LLVM_LIT_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm/bin)
+  
+  # Include LLVM as a subproject.
+  add_subdirectory(${TRITON_LLVM_SOURCE_DIR}/llvm ${CMAKE_CURRENT_BINARY_DIR}/llvm)
+  
+  set(MLIR_INCLUDE_DIRS 
+    ${TRITON_LLVM_SOURCE_DIR}/mlir/include
+    ${CMAKE_CURRENT_BINARY_DIR}/llvm/tools/mlir/include)
+    
+  set(LLVM_INCLUDE_DIRS 
+    ${TRITON_LLVM_SOURCE_DIR}/llvm/include
+    ${CMAKE_CURRENT_BINARY_DIR}/llvm/include)
+
+  list(APPEND CMAKE_MODULE_PATH ${TRITON_LLVM_SOURCE_DIR}/mlir/cmake/modules)
+  list(APPEND CMAKE_MODULE_PATH ${TRITON_LLVM_SOURCE_DIR}/llvm/cmake/modules)
+else()
+  if(NOT MLIR_DIR)
+    set(MLIR_DIR ${LLVM_LIBRARY_DIR}/cmake/mlir)
+  endif()
+  
+  if(NOT LLD_DIR)
+    set(LLD_DIR ${LLVM_LIBRARY_DIR}/cmake/lld)
+  endif()
+  
+  # MLIR
+  find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_DIR})
+
+  list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 endif()
-
-if(NOT LLD_DIR)
-  set(LLD_DIR ${LLVM_LIBRARY_DIR}/cmake/lld)
-endif()
-
-# MLIR
-find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_DIR})
-
-list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
-list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 
 include(TableGen) # required by AddMLIR
 include(AddLLVM)

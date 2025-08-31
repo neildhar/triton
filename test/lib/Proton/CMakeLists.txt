@@ -1,4 +1,4 @@
-add_mlir_library(TritonTestProton
+add_triton_library(TritonTestProton
   TestScopeIdAllocation.cpp
 
   LINK_LIBS PUBLIC
