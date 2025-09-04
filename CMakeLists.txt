@@ -99,9 +99,10 @@ if(TRITON_LLVM_SOURCE_DIR)
   # Set CMP0126 so the variables we define here take precedence over the default
   # values for the cache variables in LLVM.
   set(CMAKE_POLICY_DEFAULT_CMP0126 NEW)
-  set(LLVM_ENABLE_PROJECTS "mlir")
+  set(LLVM_ENABLE_PROJECTS "mlir;lld")
   set(LLVM_TARGETS_TO_BUILD "host;NVPTX;AMDGPU")
   set(LLVM_LIT_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm/bin)
+  set(LLVM_ADDITIONAL_BUILD_TYPES TRITONRELBUILDWITHASSERTS TRITONBUILDWITHO1)
   
   # Include LLVM as a subproject.
   add_subdirectory(${TRITON_LLVM_SOURCE_DIR}/llvm ${CMAKE_CURRENT_BINARY_DIR}/llvm)
@@ -113,6 +114,12 @@ if(TRITON_LLVM_SOURCE_DIR)
   set(LLVM_INCLUDE_DIRS 
     ${TRITON_LLVM_SOURCE_DIR}/llvm/include
     ${CMAKE_CURRENT_BINARY_DIR}/llvm/include)
+
+  if(NOT LLD_DIR)
+    set(LLD_DIR ${CMAKE_CURRENT_BINARY_DIR}/lib/cmake/lld)
+  endif()
+
+  set(LLVM_SYSPATH ${CMAKE_CURRENT_BINARY_DIR}/llvm)
 
   list(APPEND CMAKE_MODULE_PATH ${TRITON_LLVM_SOURCE_DIR}/mlir/cmake/modules)
   list(APPEND CMAKE_MODULE_PATH ${TRITON_LLVM_SOURCE_DIR}/llvm/cmake/modules)
@@ -334,11 +341,14 @@ if(TRITON_BUILD_PYTHON_MODULE)
       message(FATAL_ERROR "TRITON_WHEEL_DIR must be set.")
   endif()
 
-  configure_file(
-    "${LLVM_SYSPATH}/bin/FileCheck"
-    "${TRITON_WHEEL_DIR}/FileCheck"
-    COPYONLY)
-
+  add_custom_command(
+          OUTPUT "${TRITON_WHEEL_DIR}/FileCheck"
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:FileCheck>"
+          "${TRITON_WHEEL_DIR}/FileCheck"
+          DEPENDS FileCheck
+          COMMENT "Copying FileCheck to wheel directory"
+  )
 endif()
 
 if (UNIX AND NOT APPLE)

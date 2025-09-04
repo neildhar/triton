@@ -439,11 +439,7 @@ class CMakeBuild(build_ext):
         return cmake_args
 
     def build_extension(self, ext):
-        lit_dir = shutil.which('lit')
         ninja_dir = shutil.which('ninja')
-        # lit is used by the test suite
-        thirdparty_cmake_args = get_thirdparty_packages([get_llvm_package_info()])
-        thirdparty_cmake_args += self.get_pybind11_cmake_args()
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
         wheeldir = os.path.dirname(extdir)
 
@@ -463,9 +459,19 @@ class CMakeBuild(build_ext):
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
             "-DTRITON_WHEEL_DIR=" + wheeldir
         ]
-        if lit_dir is not None:
-            cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
-        cmake_args.extend(thirdparty_cmake_args)
+
+        cmake_args += self.get_pybind11_cmake_args()
+
+        # Check if we should simply consume LLVM from source.
+        llvm_source_dir = os.getenv("TRITON_LLVM_SOURCE_DIR")
+        if llvm_source_dir:
+            cmake_args.append("-DTRITON_LLVM_SOURCE_DIR=" + llvm_source_dir)
+        else:
+            # lit is used by the test suite
+            lit_dir = shutil.which('lit')
+            if lit_dir is not None:
+                cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
+            cmake_args += get_thirdparty_packages([get_llvm_package_info()])
 
         # configuration
         cfg = get_build_type()
