@@ -3,6 +3,9 @@ add_subdirectory(lib)
 llvm_canonicalize_cmake_booleans(
   MLIR_ENABLE_BINDINGS_PYTHON
 )
+llvm_canonicalize_cmake_booleans(
+  LLVM_BUILD_SHARED_LIBS
+)
 
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
@@ -15,6 +18,7 @@ set(TRITON_TEST_DEPENDS
   triton-opt
   triton-tensor-layout
   triton-llvm-opt
+  TritonPluginsTestLib
 )
 
 set(FILECHECK_PATH "${LLVM_LIBRARY_DIR}/../bin/FileCheck")

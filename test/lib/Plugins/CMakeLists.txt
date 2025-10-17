@@ -16,40 +16,25 @@ set(TritonPluginsTestLib_SOURCES
 
 
 foreach( plugin ${TRITON_PLUGIN_PASSES} )
-    add_mlir_library(${plugin}
-        ${${plugin}_SOURCES}
-        SHARED
-
-        ADDITIONAL_HEADER_DIRS
-        ${PROJECT_BINARY_DIR}/lib
-
-        DEPENDS
+    add_library(${plugin} SHARED ${${plugin}_SOURCES})
+    target_link_libraries(${plugin} PUBLIC triton)
+    add_dependencies(${plugin}
         TritonTableGen
         TritonCanonicalizeIncGen
         TritonPluginsIncGen
+      )
+    target_compile_options(${plugin} PRIVATE -fno-rtti)
 
-        LINK_LIBS PUBLIC
-        MLIRIR
-        MLIRInferTypeOpInterface
-        MLIRFunctionInterfaces
-        MLIRFuncDialect
-        MLIRPass
-        LLVMSupport
-        MLIRSupport
-        TritonGPUIR
-        TritonNvidiaGPUIR
-        TritonInstrumentIR
-        MLIROptLib
-        MLIRPass
-        MLIRRegisterAllDialects
-        MLIRRegisterAllPasses
-        MLIRTransforms
-        "$<$<PLATFORM_ID:Darwin>:-undefined dynamic_lookup>"
-        )
-
-    set_target_properties(${plugin} PROPERTIES
+    # CMAKE_LIBRARY_OUTPUT_DIRECTORY is only set during the Python
+    # build. It is empty if building directly from the root
+    # CMakeLists.txt file. Therefore if not building from Python just
+    # use the default CMake shared lib path otherwise this causes a hard
+    # build error
+    if(DEFINED CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+        set_target_properties(${plugin} PROPERTIES
           LIBRARY_OUTPUT_DIRECTORY
-      "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/../plugins")
+          "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/../plugins")
+    endif()
 
     target_compile_options(${plugin} PRIVATE -fvisibility=hidden)
 endforeach()

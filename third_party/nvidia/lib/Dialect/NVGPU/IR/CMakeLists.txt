@@ -4,7 +4,4 @@ add_triton_library(NVGPUIR
   DEPENDS
   NVGPUTableGen
   NVGPUAttrDefsIncGen
-
-  LINK_LIBS PUBLIC
-  MLIRLLVMDialect
 )

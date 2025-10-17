@@ -1,10 +1,9 @@
-add_mlir_library(TritonTestAnalysis
+add_library(TritonTestAnalysis STATIC
   TestAlias.cpp
   TestAxisInfo.cpp
   TestAllocation.cpp
   TestMembar.cpp
-
-  LINK_LIBS PUBLIC
-  MLIRPass
-  TritonAnalysis
 )
+
+target_compile_options(TritonTestAnalysis PRIVATE -fno-rtti)
+target_link_libraries(TritonTestAnalysis PUBLIC triton)

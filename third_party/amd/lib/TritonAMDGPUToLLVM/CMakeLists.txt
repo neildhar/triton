@@ -32,11 +32,4 @@ add_triton_library(TritonAMDGPUToLLVM
     DEPENDS
     TritonAMDGPUConversionPassIncGen
     LLVMIRIncGen
-
-    LINK_LIBS PUBLIC
-    TritonGPUToLLVM
-    TritonAMDGPUIR
-    LLVMCore
-    LLVMPasses
-    LLVMSupport
 )

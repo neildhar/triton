@@ -170,7 +170,100 @@ endif()
 
 # -----
 
-# ------
+# Add f2reduce before collecting libraries
+add_subdirectory(third_party/f2reduce)
+
+# Add backends before collecting libraries
+if(NOT TRITON_BUILD_PYTHON_MODULE)
+  foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
+    add_subdirectory(third_party/${CODEGEN_BACKEND})
+  endforeach()
+  add_subdirectory(third_party/proton/Dialect)
+endif()
+
+get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
+get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
+set(TRITON_LIBRARIES
+        ${triton_libs}
+        ${triton_plugins}
+
+        # mlir
+        MLIRAMDGPUDialect
+        MLIRNVVMDialect
+        MLIRNVVMToLLVMIRTranslation
+        MLIRGPUToNVVMTransforms
+        MLIRGPUToGPURuntimeTransforms
+        MLIRGPUTransforms
+        MLIRIR
+        MLIRControlFlowToLLVM
+        MLIRBytecodeWriter
+        MLIRPass
+        MLIRTransforms
+        MLIRLLVMDialect
+        MLIRSupport
+        MLIRArithToLLVM
+        MLIRBuiltinToLLVMIRTranslation
+        MLIRNVVMToLLVM
+        MLIRLLVMToLLVMIRTranslation
+        MLIRLLVMIRTransforms
+        MLIRSCFToControlFlow
+        MLIRTargetLLVMIRExport
+        TritonGPUToLLVM
+        MLIRTargetLLVMIRExport
+        MLIRMathToLLVM
+        MLIRROCDLToLLVMIRTranslation
+        MLIRGPUDialect
+        MLIRSCFToControlFlow
+        MLIRIndexToLLVM
+        MLIRGPUToROCDLTransforms
+        MLIRUBToLLVM
+        MLIRReconcileUnrealizedCasts
+        MLIROptLib
+        MLIRRegisterAllPasses
+
+        # LLVM
+        LLVMPasses
+        LLVMNVPTXCodeGen
+        LLVMSupport
+        # LLVMNVPTXAsmPrinter
+        LLVMAMDGPUCodeGen
+        LLVMAMDGPUAsmParser
+)
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR # Linux arm64
+        CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR # macOS arm64
+        CMAKE_OSX_ARCHITECTURES MATCHES "arm64")  # also macOS arm64
+  list(APPEND TRITON_LIBRARIES
+          LLVMAArch64CodeGen
+          LLVMAArch64AsmParser
+  )
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64")
+  list(APPEND TRITON_LIBRARIES
+          LLVMX86CodeGen
+          LLVMX86AsmParser
+  )
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+  list(APPEND TRITON_LIBRARIES
+          LLVMPowerPCAsmParser
+          LLVMPowerPCCodeGen
+  )
+else()
+  message(FATAL_ERROR "LLVM codegen/ASM parser libs: This HW architecture (${CMAKE_SYSTEM_PROCESSOR}) is not configured in cmake lib dependencies.")
+endif()
+
+# Define triton library
+string(JOIN "," TRITON_BACKENDS_TUPLE ${TRITON_CODEGEN_BACKENDS})
+
+if (DEFINED TRITON_PLUGIN_NAMES)
+  string(JOIN "," TRITON_BACKENDS_TUPLE ${TRITON_BACKENDS_TUPLE} ${TRITON_PLUGIN_NAMES})
+endif()
+
+message(STATUS "Triton backends tuple: ${TRITON_BACKENDS_TUPLE}")
+
+set(TRITON_BACKENDS_TUPLE "(${TRITON_BACKENDS_TUPLE})")
+add_compile_definitions(TRITON_BACKENDS_TUPLE=${TRITON_BACKENDS_TUPLE})
+
+        # ------
 if(TRITON_BUILD_PYTHON_MODULE)
   message(STATUS "Adding Python module")
   set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/python/src)
@@ -207,79 +300,10 @@ if(TRITON_BUILD_PYTHON_MODULE)
   # We always build proton dialect
   list(APPEND TRITON_PLUGIN_NAMES "proton")
   add_subdirectory(third_party/proton/Dialect)
-
-  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
-  get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
-  set(TRITON_LIBRARIES
-    ${triton_libs}
-    ${triton_plugins}
-
-    # mlir
-    MLIRAMDGPUDialect
-    MLIRNVVMDialect
-    MLIRNVVMToLLVMIRTranslation
-    MLIRGPUToNVVMTransforms
-    MLIRGPUToGPURuntimeTransforms
-    MLIRGPUTransforms
-    MLIRIR
-    MLIRControlFlowToLLVM
-    MLIRBytecodeWriter
-    MLIRPass
-    MLIRTransforms
-    MLIRLLVMDialect
-    MLIRSupport
-    MLIRTargetLLVMIRExport
-    MLIRMathToLLVM
-    MLIRROCDLToLLVMIRTranslation
-    MLIRGPUDialect
-    MLIRSCFToControlFlow
-    MLIRIndexToLLVM
-    MLIRGPUToROCDLTransforms
-    MLIRUBToLLVM
-
-    # LLVM
-    LLVMPasses
-    LLVMNVPTXCodeGen
-    # LLVMNVPTXAsmPrinter
-    LLVMAMDGPUCodeGen
-    LLVMAMDGPUAsmParser
-
+  list(APPEND TRITON_LIBRARIES
     Python3::Module
     pybind11::headers
-
   )
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR # Linux arm64
-     CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR # macOS arm64
-     CMAKE_OSX_ARCHITECTURES MATCHES "arm64")  # also macOS arm64
-      list(APPEND TRITON_LIBRARIES
-          LLVMAArch64CodeGen
-          LLVMAArch64AsmParser
-      )
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64")
-      list(APPEND TRITON_LIBRARIES
-          LLVMX86CodeGen
-          LLVMX86AsmParser
-      )
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-      list(APPEND TRITON_LIBRARIES
-        LLVMPowerPCAsmParser
-        LLVMPowerPCCodeGen
-      )
-  else()
-    message(FATAL_ERROR "LLVM codegen/ASM parser libs: This HW architecture (${CMAKE_SYSTEM_PROCESSOR}) is not configured in cmake lib dependencies.")
-  endif()
-
-  # Define triton library
-  string(JOIN "," TRITON_BACKENDS_TUPLE ${TRITON_CODEGEN_BACKENDS})
-
-  if (DEFINED TRITON_PLUGIN_NAMES)
-    string(JOIN "," TRITON_BACKENDS_TUPLE ${TRITON_BACKENDS_TUPLE} ${TRITON_PLUGIN_NAMES})
-  endif()
-
-  message(STATUS "Triton backends tuple: ${TRITON_BACKENDS_TUPLE}")
-
-  set(TRITON_BACKENDS_TUPLE "(${TRITON_BACKENDS_TUPLE})")
-  add_compile_definitions(TRITON_BACKENDS_TUPLE=${TRITON_BACKENDS_TUPLE})
   add_library(triton SHARED ${PYTHON_SRC_PATH}/main.cc
                   ${PYTHON_SRC_PATH}/ir.cc
                   ${PYTHON_SRC_PATH}/gluon_ir.cc
@@ -287,17 +311,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
                   ${PYTHON_SRC_PATH}/interpreter.cc
                   ${PYTHON_SRC_PATH}/llvm.cc
                   ${PYTHON_SRC_PATH}/specialize.cc)
-
-  # Link triton with its dependencies
-  target_link_libraries(triton PRIVATE ${TRITON_LIBRARIES})
-  if(WIN32)
-    target_link_libraries(triton PRIVATE ${CMAKE_DL_LIBS})
-    set_target_properties(triton PROPERTIES SUFFIX ".pyd")
-    set_target_properties(triton PROPERTIES PREFIX "lib")
-  else()
-    target_link_libraries(triton PRIVATE z)
-  endif()
-  target_link_options(triton PRIVATE ${LLVM_LDFLAGS})
 
   if (NOT DEFINED LLVM_SYSPATH)
       message(FATAL_ERROR "LLVM_SYSPATH must be set.")
@@ -311,8 +324,48 @@ if(TRITON_BUILD_PYTHON_MODULE)
     "${LLVM_SYSPATH}/bin/FileCheck"
     "${TRITON_WHEEL_DIR}/FileCheck"
     COPYONLY)
-
+else()
+  # Ensure a dummy source exists in the build tree and use it for the library.
+  set(DUMMY_CC_PATH "${CMAKE_CURRENT_BINARY_DIR}/dummy.cc")
+  file(WRITE "${DUMMY_CC_PATH}" "// Auto-generated dummy source for triton\n")
+  add_library(triton SHARED "${DUMMY_CC_PATH}")
+  # Put libtriton in lib/ subdirectory so the default rpath works
+  set_target_properties(triton PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
 endif()
+
+# Link triton with its dependencies
+if(WIN32)
+  target_link_libraries(triton PRIVATE ${CMAKE_DL_LIBS})
+  set_target_properties(triton PROPERTIES SUFFIX ".pyd")
+  set_target_properties(triton PROPERTIES PREFIX "lib")
+else()
+  # Separate object libraries from regular libraries
+  set(TRITON_OBJECT_LIBS "")
+  set(TRITON_REGULAR_LIBS "")
+  foreach(lib ${TRITON_LIBRARIES})
+    get_target_property(lib_type ${lib} TYPE)
+    if(lib_type STREQUAL "OBJECT_LIBRARY")
+      list(APPEND TRITON_OBJECT_LIBS ${lib})
+    else()
+      list(APPEND TRITON_REGULAR_LIBS ${lib})
+    endif()
+  endforeach()
+
+  # Link object libraries as PUBLIC so their interface dependencies (tablegen targets) propagate
+  target_link_libraries(triton PUBLIC ${TRITON_OBJECT_LIBS})
+
+  # Link regular libraries with WHOLE_ARCHIVE
+  list(JOIN TRITON_REGULAR_LIBS "," TRITON_REGULAR_LIBS_COMMA_SEP)
+  target_link_libraries(triton PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${TRITON_REGULAR_LIBS_COMMA_SEP}>")
+  target_link_libraries(triton PRIVATE z)
+
+  # Prevent libtriton from propagating regular library dependencies to consumers
+  # Keep only the object libraries in the interface
+  set_target_properties(triton PROPERTIES INTERFACE_LINK_LIBRARIES "${TRITON_OBJECT_LIBS}")
+endif()
+target_link_options(triton PRIVATE ${LLVM_LDFLAGS})
 
 if (UNIX AND NOT APPLE)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
@@ -329,16 +382,8 @@ if(TRITON_BUILD_PYTHON_MODULE AND NOT WIN32)
   target_link_options(triton PRIVATE ${PYTHON_LDFLAGS})
 endif()
 
-if(NOT TRITON_BUILD_PYTHON_MODULE)
-  foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
-    add_subdirectory(third_party/${CODEGEN_BACKEND})
-  endforeach()
-  add_subdirectory(third_party/proton/Dialect)
-endif()
-
 find_package(Threads REQUIRED)
 
-add_subdirectory(third_party/f2reduce)
 add_subdirectory(bin)
 add_subdirectory(test)
 

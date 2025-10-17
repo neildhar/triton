@@ -1,7 +1,6 @@
-add_mlir_library(TritonTestDialect
+add_library(TritonTestDialect STATIC
   TestLoopPeeling.cpp
-
-  LINK_LIBS PUBLIC
-  MLIRPass
-  TritonTransforms
 )
+
+target_compile_options(TritonTestDialect PRIVATE -fno-rtti)
+target_link_libraries(TritonTestDialect PUBLIC triton)

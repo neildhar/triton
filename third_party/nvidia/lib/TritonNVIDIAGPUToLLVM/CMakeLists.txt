@@ -24,12 +24,4 @@ add_triton_library(TritonNVIDIAGPUToLLVM
     DEPENDS
     TritonNVIDIAGPUConversionPassIncGen
     NVGPUAttrDefsIncGen
-
-    LINK_LIBS PUBLIC
-    TritonAnalysis
-    TritonGPUToLLVM
-    TritonInstrumentToLLVM
-    MLIRReconcileUnrealizedCasts
-    NVGPUIR
-    MLIRUBToLLVM
 )

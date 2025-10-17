@@ -6,10 +6,4 @@ add_triton_library(TritonAMDAnalysis
   DEPENDS
   TritonTableGen
   TritonAMDGPUTableGen
-
-  LINK_LIBS PUBLIC
-  MLIRAnalysis
-  MLIRLLVMDialect
-  TritonIR
-  TritonGPUIR
 )

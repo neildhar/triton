@@ -17,11 +17,4 @@ add_triton_library(TritonTransforms
   DEPENDS
   TritonTransformsIncGen
   TritonCombineIncGen
-
-  LINK_LIBS PUBLIC
-  MLIRPass
-  MLIRTransformUtils
-  MLIRTransforms
-  MLIRSCFToControlFlow
-  TritonIR
 )

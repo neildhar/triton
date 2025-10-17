@@ -5,8 +5,4 @@ add_triton_library(NVWSIR
   DEPENDS
   NVWSTableGen
   NVWSAttrDefsIncGen
-
-  LINK_LIBS PUBLIC
-  TritonIR
-  TritonGPUIR
 )
