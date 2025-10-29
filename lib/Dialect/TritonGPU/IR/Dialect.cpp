@@ -2732,6 +2732,12 @@ struct TritonGPUInferLayoutInterface
   LogicalResult
   verifyDotOpEncodingCompatibility(Operation *op, Attribute operandEncodingA,
                                    Attribute operandEncodingB) const override {
+    // Verify MMA version is supported for DotOp
+    auto dotOp = cast<DotOp>(op);
+    auto resEnc = dotOp.getResult().getType().getEncoding();
+    if (auto mmaEncoding = dyn_cast<NvidiaMmaEncodingAttr>(resEnc))
+      if (!supportMMA(dotOp, mmaEncoding.getVersionMajor()))
+        return op->emitError("unsupported MMA version");
     auto aEncoding =
         mlir::dyn_cast<triton::gpu::DotOperandEncodingAttr>(operandEncodingA);
     auto bEncoding =
@@ -3657,11 +3663,14 @@ void TritonGPUDialect::initialize() {
   addAttributes<
 #define GET_ATTRDEF_LIST
 #include "triton/Dialect/TritonGPU/IR/AttrDefs.cpp.inc"
+
       >();
   addOperations<
 #define GET_OP_LIST
 #include "triton/Dialect/TritonGPU/IR/Ops.cpp.inc"
+
 #include "triton/Dialect/TritonGPU/IR/OpsEnums.cpp.inc"
+
       >();
   addInterfaces<TritonInlinerInterface>();
   addInterfaces<TritonGPUOpAsmInterface>();
