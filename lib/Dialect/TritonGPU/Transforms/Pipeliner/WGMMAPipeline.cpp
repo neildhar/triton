@@ -390,8 +390,7 @@ splitRSDots(const llvm::MapVector<Operation *, int> &dots) {
 //  1. All operands that touch shared memory are multi-buffered, i.e. can't read
 //     an incomplete value while it's being written asynchronously by a load.
 //     1a. If operand A is in registers, these registers cannot be updated
-//     inside
-//         the loop.
+//     inside the loop.
 //         **Exception** if the operand is produced by a preceding WGMMA,
 //         then this op can be properly async. Either the f16 shortcut is
 //         possible and the WGMMA's can run back-to-back (see rule 3 below), or
@@ -466,32 +465,27 @@ static std::optional<int> dotCanBeProperlyAsync(ttng::WarpGroupDotOp dotOp,
 
   // Rule 2: The dot cannot be unconditionally used by any op in the loop.
   // Uses under `if` are allowed, as can be explicitly synced with a `wait 0`.
-  int iterArgIdx = -1;
-  Value iterArg = nullptr;
-  SmallVector<std::pair<Operation *, int>> queue;
-  for (auto &use : dotOp->getUses()) {
-    queue.push_back({use.getOwner(), use.getOperandNumber()});
-  }
+  OpOperand *iterOperand = nullptr;
+  SmallVector<OpOperand *> queue{llvm::make_pointer_range(dotOp->getUses())};
   while (!queue.empty()) {
-    auto [user, argIdx] = queue.pop_back_val();
+    OpOperand *operand = queue.pop_back_val();
+    Operation *user = operand->getOwner();
     if (user->getParentOp() == forOp) {
       // We support noops in between the dot and the yield
       if (isNoop(user)) {
-        for (auto &use : user->getResult(0).getUses()) {
-          queue.push_back({use.getOwner(), use.getOperandNumber()});
-        }
+        for (auto &use : user->getResult(0).getUses())
+          queue.push_back(&use);
         continue;
       }
       if (isa<scf::YieldOp>(user)) {
-        if (iterArg) {
+        if (iterOperand) {
           // The dot is used by the loop's yield, but we can't have any other
           // uses.
           LDBG("Can't make dot async because dot is used by multiple ops in "
                "the loop.");
           return std::nullopt;
         }
-        iterArgIdx = argIdx;
-        iterArg = forOp.getRegionIterArg(argIdx);
+        iterOperand = operand;
         continue;
       }
       LDBG("Can't make dot async because dot is unconditionally used in the "
@@ -501,19 +495,17 @@ static std::optional<int> dotCanBeProperlyAsync(ttng::WarpGroupDotOp dotOp,
     if (auto ifOp = dyn_cast<scf::IfOp>(user->getParentOp())) {
       if (isa<scf::YieldOp>(user)) {
         // The result is returned by the if, follow it further.
-        auto uses = ifOp.getResult(argIdx).getUses();
-        for (auto &use : uses) {
-          queue.push_back({use.getOwner(), use.getOperandNumber()});
-        }
+        for (auto &use : ifOp.getResult(operand->getOperandNumber()).getUses())
+          queue.push_back(&use);
       }
-    } else {
-      return std::nullopt;
+      continue;
     }
+    return std::nullopt;
   }
 
   // The dot result is not used by the loop yield. This could happen if it is
   // dead, or if it is only used inside (but not yielded by) an scf::IfOp.
-  if (!iterArg)
+  if (!iterOperand)
     return std::nullopt;
 
   // Rule 2.1: We don't make the dot async if the accumulator is not fp32.
@@ -533,9 +525,12 @@ static std::optional<int> dotCanBeProperlyAsync(ttng::WarpGroupDotOp dotOp,
     if (isNoop(user))
       return llvm::all_of(user->getResult(0).getUses(),
                           isTransitivelyWarpGroupDot);
+    LDBG("Can't make dot async because its result from i-1 is used by "
+         "something other than another MMAv3 dot as the `c` operand.");
     return false;
   };
-
+  int iterArgIdx = iterOperand->getOperandNumber();
+  BlockArgument iterArg = forOp.getRegionIterArg(iterArgIdx);
   if (llvm::all_of(iterArg.getUses(), isTransitivelyWarpGroupDot))
     return iterArgIdx;
 
@@ -546,26 +541,20 @@ static std::optional<int> dotCanBeProperlyAsync(ttng::WarpGroupDotOp dotOp,
   auto waitOps = forOp.getBody()->getOps<ttng::WarpGroupDotWaitOp>();
   auto firstWaitOpIter = llvm::find_if(
       waitOps, [&](auto waitOp) { return waitOp.getPendings() == 0; });
-  if (firstWaitOpIter != waitOps.end() &&
-      llvm::all_of(iterArg.getUsers(), [&](Operation *user) {
-        assert(forOp->isAncestor(user));
-        while (user->getParentOp() != forOp) {
-          user = user->getParentOp();
-        }
-        return (*firstWaitOpIter)->isBeforeInBlock(user);
-      })) {
-    LDBG("MMAv3 dot can be properly async because it follows a "
-         "warp_group_dot_wait "
-         "{pendings=0}.\n"
-         << "  wait: " << *firstWaitOpIter << "\n"
-         << "  dot: " << dotOp);
-    threadValuesThroughWait(*firstWaitOpIter, {iterArg});
-    return iterArgIdx;
+  if (firstWaitOpIter == waitOps.end())
+    return std::nullopt;
+  for (Operation *user : iterArg.getUsers()) {
+    auto ancestor = forOp.getBody()->findAncestorOpInBlock(*user);
+    if (ancestor->isBeforeInBlock(*firstWaitOpIter))
+      return std::nullopt;
   }
-
-  LDBG("Can't make dot async because its result from i-1 is used by "
-       "something other than another MMAv3 dot as the `c` operand.");
-  return std::nullopt;
+  LDBG("MMAv3 dot can be properly async because it follows a "
+       "warp_group_dot_wait "
+       "{pendings=0}.\n"
+       << "  wait: " << *firstWaitOpIter << "\n"
+       << "  dot: " << dotOp);
+  threadValuesThroughWait(*firstWaitOpIter, {iterArg});
+  return iterArgIdx;
 }
 
 // If necessary, insert a dot-wait inside the loop, waiting for the results of
