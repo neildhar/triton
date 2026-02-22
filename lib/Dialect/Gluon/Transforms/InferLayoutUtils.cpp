@@ -37,110 +37,78 @@ namespace {
 ///                     reshape, join, split, etc.)
 ///   - Hard(encoding): A fixed encoding that cannot be overridden
 ///   - Overdefined: Conflicting hard encodings were found
-struct LayoutLattice : public dataflow::AbstractSparseLattice {
+class LayoutLattice : public dataflow::AbstractSparseLattice {
+public:
+  Attribute encoding;
+  enum class State {
+    Undefined,
+    MayVary,
+    SingleEncoding,
+    Overdefined,
+  } state = State::Undefined;
+
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LayoutLattice)
   using AbstractSparseLattice::AbstractSparseLattice;
 
   void print(raw_ostream &os) const override {
-    if (isOverdefined) {
-      os << "overdefined";
-    } else if (encoding) {
-      os << (mayVary ? "soft(" : "hard(") << encoding << ")";
-    } else {
-      os << "uninitialized";
+    switch (state) {
+    case State::Undefined:
+      os << "Undefined";
+    case State::MayVary:
+      os << "MayVary";
+    case State::SingleEncoding:
+      os << "Single(" << encoding << ')';
+    case State::Overdefined:
+      os << "Overdefined";
     }
-  }
-
-  /// Returns true if this lattice has a valid encoding (not uninitialized or
-  /// overdefined).
-  bool hasEncoding() const { return encoding && !isOverdefined; }
-
-  /// Set to a new encoding. Returns whether the lattice changed.
-  ChangeResult set(Attribute newEncoding, bool newMayVary) {
-    if (isOverdefined)
-      return ChangeResult::NoChange;
-
-    // If we don't have an encoding yet, take the new one.
-    if (!encoding) {
-      encoding = newEncoding;
-      mayVary = newMayVary;
-      return ChangeResult::Change;
-    }
-
-    // Combine with existing encoding.
-    return combine(newEncoding, newMayVary);
-  }
-
-  /// Mark as overdefined (conflicting encodings).
-  ChangeResult markOverdefined() {
-    if (isOverdefined)
-      return ChangeResult::NoChange;
-    isOverdefined = true;
-    return ChangeResult::Change;
   }
 
   /// Join operation (used by forward analysis).
   ChangeResult join(const AbstractSparseLattice &rhs) override {
-    const auto &other = static_cast<const LayoutLattice &>(rhs);
-    return combineWith(other);
+    auto &other = static_cast<const LayoutLattice &>(rhs);
+    return joinImpl(other.state, other.encoding);
   }
 
   /// Meet operation (used by backward analysis) - same as join for this
   /// analysis.
   ChangeResult meet(const AbstractSparseLattice &rhs) override {
-    const auto &other = static_cast<const LayoutLattice &>(rhs);
-    return combineWith(other);
+    return join(rhs);
   }
 
-  Attribute encoding;
-  bool mayVary = false;
-  bool isOverdefined = false;
+  ChangeResult joinImpl(State otherState, Attribute otherEncoding) {
+    // If the other lattice is in an earlier state, nothing to do.
+    if (otherState < state)
+      return ChangeResult::NoChange;
+
+    // If both are fixed encodings, then we have failed.
+    if (otherState == State::SingleEncoding && state == State::SingleEncoding)
+      return setState(State::Overdefined, {});
+
+    // Advance to the state of other.
+    // Hash the string representation so conflict resolution does not depend on
+    // solver visitation order.
+    auto hashEncoding = [](Attribute attr) {
+      std::string str;
+      llvm::raw_string_ostream os(str);
+      attr.print(os);
+      return llvm::xxh3_64bits(str);
+    };
+    auto newEncoding = hashEncoding(encoding) > hashEncoding(otherEncoding)
+                           ? encoding
+                           : otherEncoding;
+    return setState(otherState, newEncoding);
+  }
 
 private:
-  /// Combine with another lattice value.
-  ChangeResult combineWith(const LayoutLattice &other) {
-    // If other is uninitialized, no change.
-    if (!other.encoding && !other.isOverdefined)
-      return ChangeResult::NoChange;
-
-    // If other is overdefined, we become overdefined.
-    if (other.isOverdefined)
-      return markOverdefined();
-
-    // If we're uninitialized, take other's value.
-    if (!encoding) {
-      encoding = other.encoding;
-      mayVary = other.mayVary;
-      return ChangeResult::Change;
-    }
-
-    return combine(other.encoding, other.mayVary);
-  }
-
-  /// Combine this encoding with a new one.
-  ChangeResult combine(Attribute newEncoding, bool newMayVary) {
-    // If encodings match, prefer the harder constraint.
-    if (encoding == newEncoding) {
-      if (mayVary && !newMayVary) {
-        mayVary = false;
-        return ChangeResult::Change;
-      }
-      return ChangeResult::NoChange;
-    }
-
-    // Different encodings - soft constraints yield to others.
-    if (mayVary) {
-      encoding = newEncoding;
-      mayVary = newMayVary;
-      return ChangeResult::Change;
-    }
-    if (newMayVary) {
-      // Keep our hard encoding.
-      return ChangeResult::NoChange;
-    }
-
-    // Two different hard encodings - conflict!
-    return markOverdefined();
+  ChangeResult setState(State newState, Attribute newEncoding) {
+    auto oldState = std::exchange(state, newState);
+    assert(newState >= oldState && "State going backwards");
+    // TODO: If state does not change, but encoding does, is this sufficient? Is
+    //       there a way to make it monotonic?
+    auto oldEncoding = std::exchange(encoding, newEncoding);
+    return oldState == newState && oldEncoding == newEncoding
+               ? ChangeResult::NoChange
+               : ChangeResult::Change;
   }
 };
 
@@ -149,7 +117,7 @@ private:
 //===----------------------------------------------------------------------===//
 
 /// Returns true if the operation produces encodings that may vary.
-static bool encodingsMayVary(Operation *op) {
+bool encodingsMayVary(Operation *op) {
   return isa<triton::JoinOp, triton::SplitOp, triton::ReshapeOp, triton::CatOp,
              triton::TransOp>(op);
 }
@@ -162,14 +130,10 @@ public:
   LogicalResult visitOperation(Operation *op,
                                ArrayRef<const LayoutLattice *> operands,
                                ArrayRef<LayoutLattice *> results) override {
-    // For operations without tensor results, nothing to do.
-    if (results.empty())
-      return success();
-
     // Find an operand with an encoding.
     const LayoutLattice *srcLattice = nullptr;
     for (const auto *operand : operands) {
-      if (operand->hasEncoding()) {
+      if (operand->encoding) {
         srcLattice = operand;
         break;
       }
@@ -183,13 +147,20 @@ public:
     if (!dstEnc)
       return success();
 
-    bool dstMayVary = srcLattice->mayVary || encodingsMayVary(op);
+    bool dstMayVary = encodingsMayVary(op);
+    auto dstState =
+        dstMayVary ? LayoutLattice::State::MayVary : srcLattice->state;
+    // Create a temporary lattice to meet with operands.
+    LayoutLattice dstLattice(Value{});
+    dstLattice.encoding = dstEnc;
+    dstLattice.state = dstState;
 
     // Propagate to all tensor results.
     for (auto [result, lattice] : llvm::zip(op->getResults(), results)) {
       if (!isa<RankedTensorType>(result.getType()))
         continue;
-      propagateIfChanged(lattice, lattice->set(dstEnc, dstMayVary));
+
+      propagateIfChanged(lattice, lattice->join(dstLattice));
     }
 
     return success();
@@ -209,16 +180,13 @@ class BackwardLayoutAnalysis
 public:
   using SparseBackwardDataFlowAnalysis::SparseBackwardDataFlowAnalysis;
 
-  LogicalResult visitOperation(Operation *op, ArrayRef<LayoutLattice *> operands,
-                               ArrayRef<const LayoutLattice *> results) override {
-    // For operations without tensor operands, nothing to do.
-    if (operands.empty())
-      return success();
-
+  LogicalResult
+  visitOperation(Operation *op, ArrayRef<LayoutLattice *> operands,
+                 ArrayRef<const LayoutLattice *> results) override {
     // Find a result with an encoding.
     const LayoutLattice *dstLattice = nullptr;
     for (const auto *result : results) {
-      if (result->hasEncoding()) {
+      if (result->encoding) {
         dstLattice = result;
         break;
       }
@@ -232,12 +200,14 @@ public:
     if (!srcEnc)
       return success();
 
-    bool srcMayVary = dstLattice->mayVary || encodingsMayVary(op);
+    bool srcMayVary = encodingsMayVary(op);
+    auto srcState =
+        srcMayVary ? LayoutLattice::State::MayVary : dstLattice->state;
 
     // Create a temporary lattice to meet with operands.
     LayoutLattice srcLattice(Value{});
     srcLattice.encoding = srcEnc;
-    srcLattice.mayVary = srcMayVary;
+    srcLattice.state = srcState;
 
     // Propagate to all tensor operands via meet.
     for (auto [operand, lattice] : llvm::zip(op->getOperands(), operands)) {
@@ -257,8 +227,9 @@ public:
     // Non-forwarded call operands don't propagate layouts.
   }
 
-  void visitNonControlFlowArguments(RegionSuccessor &successor,
-                                    ArrayRef<BlockArgument> arguments) override {
+  void
+  visitNonControlFlowArguments(RegionSuccessor &successor,
+                               ArrayRef<BlockArgument> arguments) override {
     // Non-control-flow arguments (e.g., loop induction variables) don't
     // propagate layouts.
   }
@@ -296,7 +267,7 @@ LogicalResult inferLayout(
   // Initialize seed encodings before running the analysis.
   for (auto &[value, encoding] : seedEncodings) {
     auto *lattice = solver.getOrCreateState<LayoutLattice>(value);
-    (void)lattice->set(encoding, /*mayVary=*/false);
+    (void)lattice->joinImpl(LayoutLattice::State::SingleEncoding, encoding);
   }
 
   // Run the analysis to fixed point.
@@ -312,11 +283,6 @@ LogicalResult inferLayout(
       auto *lattice = solver.lookupState<LayoutLattice>(result);
       if (!lattice || !lattice->encoding) {
         // No encoding inferred - will be caught by doubleCheckEncodings.
-        continue;
-      }
-      if (lattice->isOverdefined) {
-        op->emitOpError("found conflicting encodings for result");
-        hadError = true;
         continue;
       }
       // Apply the encoding.
@@ -342,12 +308,6 @@ LogicalResult inferLayout(
       auto *lattice = solver.lookupState<LayoutLattice>(arg);
       if (!lattice || !lattice->encoding) {
         // No encoding inferred - will be caught by doubleCheckEncodings.
-        continue;
-      }
-      if (lattice->isOverdefined) {
-        block->getParentOp()->emitOpError(
-            "found conflicting encodings for block argument");
-        hadError = true;
         continue;
       }
       // Apply the encoding.
