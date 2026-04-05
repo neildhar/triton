@@ -13,7 +13,6 @@ target_link_libraries(triton-opt PRIVATE
   # MLIR core
   MLIROptLib
   MLIRPass
-  MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms
 )
@@ -34,7 +33,6 @@ target_link_libraries(triton-reduce PRIVATE
   # MLIR core
   MLIRReduceLib
   MLIRPass
-  MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms
 )
@@ -54,7 +52,6 @@ target_link_libraries(triton-lsp PRIVATE
   # MLIR core
   MLIRLspServerLib
   MLIRPass
-  MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms
 )
@@ -85,7 +82,6 @@ target_link_libraries(triton-tensor-layout PRIVATE
   TritonTestDialect
   TritonTestProton
   TritonAMDGPUTestAnalysis
-  MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms
 )
